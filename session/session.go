@@ -11,7 +11,8 @@ import (
 	"maitian.com/kepler/rtclib/utils"
 )
 
-const bufferThreshold = 10 * 1024 * 1024
+const bufferedThreshold = 5 * 1024 * 1024
+const maxBufferedAmount = 20 * 1024 * 1024
 
 type ConnectionHandler func(*Session)
 type MessageHandler func(*Session, []byte)
@@ -29,6 +30,7 @@ type Session struct {
 	candidateCh       chan string
 	candidatesMux     sync.Mutex
 	pendingCandidates []*webrtc.ICECandidate
+	sendMoreCh        chan struct{}
 }
 
 func SessionNew() *Session {
@@ -37,6 +39,7 @@ func SessionNew() *Session {
 		stunServers: []string{},
 		offerCh:     make(chan webrtc.SessionDescription),
 		candidateCh: make(chan string),
+		sendMoreCh:  make(chan struct{}),
 	}
 	return &sess
 }
@@ -205,18 +208,16 @@ func (s *Session) GenPeerConnection() *webrtc.PeerConnection {
 	peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
 		logger.Infof("New DataChannel %s %d", d.Label(), d.ID())
 		s.dataChannel = d
+		d.SetBufferedAmountLowThreshold(bufferedThreshold)
 
 		// Register channel opening handling
 		d.OnOpen(func() {
-			logger.Infof("Data channel '%s'-'%d' open. Random messages will now be sent to any connected DataChannels every x seconds",
-				d.Label(), d.ID())
+			logger.Infof("Data channel '%s'-'%d' open.", d.Label(), d.ID())
 			s.onConnection(s)
 		})
 
 		// Register text message handling
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-
-			logger.Debugf("Message from DataChannel '%s': len:'%d'", d.Label(), len(msg.Data))
 			s.onMessage(s, msg.Data)
 		})
 
@@ -226,7 +227,7 @@ func (s *Session) GenPeerConnection() *webrtc.PeerConnection {
 		})
 
 		d.OnBufferedAmountLow(func() {
-			logger.Infof("OnBufferedAmountLow: BufferAmount %d", d.BufferedAmount())
+			s.sendMoreCh <- struct{}{}
 		})
 	})
 
@@ -240,6 +241,12 @@ func (s *Session) closePeerConnection(peerConnection *webrtc.PeerConnection) {
 }
 
 func (s *Session) Send(data []byte) error {
+	if s.dataChannel.BufferedAmount() > maxBufferedAmount {
+		select {
+		case <-s.sendMoreCh:
+		case <-time.After(time.Millisecond * 100):
+		}
+	}
 	err := s.dataChannel.Send(data)
 	return err
 }

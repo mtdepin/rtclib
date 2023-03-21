@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"maitian.com/kepler/rtclib/signal"
+	"gitlab.mty.wang/kepler/rtclib/signal"
 )
 
 func main() {

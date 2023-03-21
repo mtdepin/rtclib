@@ -1,4 +1,4 @@
-module maitian.com/kepler/rtclib
+module gitlab.mty.wang/kepler/rtclib
 
 go 1.20
 

@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pion/webrtc/v3"
-	"maitian.com/kepler/rtclib/peer"
+	"gitlab.mty.wang/kepler/rtclib/peer"
 )
 
 const MaxBufferLen = 16 * 1024
@@ -102,6 +102,8 @@ func sendFile(path string, p *peer.Peer) {
 	}
 	defer f.Close()
 
+	start := time.Now()
+
 	err = p.SendText(path)
 	if err != nil {
 		fmt.Println("SendText error:", err)
@@ -136,6 +138,8 @@ func sendFile(path string, p *peer.Peer) {
 		}
 		time.Sleep(time.Second)
 	}
+	timeElapsed := time.Since(start)
+	fmt.Println("timeElapsed:", timeElapsed)
 }
 
 func recvFile(pathCh chan string, doneCh chan struct{}, msgCh chan []byte) {
@@ -147,12 +151,16 @@ func recvFile(pathCh chan string, doneCh chan struct{}, msgCh chan []byte) {
 	}
 	defer f.Close()
 
+	start := time.Now()
+
 	total := 0
 	for {
 		select {
 		case <-doneCh:
 			fmt.Println("Recv file done.")
 			fmt.Println("Write total:", total)
+			timeElapsed := time.Since(start)
+			fmt.Println("timeElapsed:", timeElapsed)
 			return
 		case msg := <-msgCh:
 			n, err := f.Write(msg)

@@ -8,7 +8,7 @@ import (
 
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
-	"maitian.com/kepler/rtclib/logger"
+	"gitlab.mty.wang/kepler/rtclib/logger"
 )
 
 type AnswerPeer struct {

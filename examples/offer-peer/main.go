@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pion/webrtc/v3"
-	"maitian.com/kepler/rtclib/offer"
+	"gitlab.mty.wang/kepler/rtclib/offer"
 )
 
 const MaxBufferLen = 16 * 1024

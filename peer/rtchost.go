@@ -9,7 +9,7 @@ import (
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 	"github.com/pion/webrtc/v3"
-	"maitian.com/kepler/rtclib/logger"
+	"gitlab.mty.wang/kepler/rtclib/logger"
 )
 
 var DefaultICEServer = []webrtc.ICEServer{

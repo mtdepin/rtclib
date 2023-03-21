@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v3"
-	"maitian.com/kepler/rtclib/logger"
+	"gitlab.mty.wang/kepler/rtclib/logger"
 )
 
 const (

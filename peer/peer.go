@@ -21,6 +21,7 @@ type Peer struct {
 	candidatesMux     sync.Mutex
 	sendCandidate     func(*webrtc.ICECandidate)
 	onMessage         func(webrtc.DataChannelMessage)
+	onMessageCh       chan struct{}
 	onClose           func()
 	onConnect         func()
 	sendMoreCh        chan struct{}
@@ -28,8 +29,9 @@ type Peer struct {
 
 func NewPeer(peerId string, iceServers *[]webrtc.ICEServer) (*Peer, error) {
 	peer := Peer{
-		peerId:     peerId,
-		sendMoreCh: make(chan struct{}),
+		peerId:      peerId,
+		sendMoreCh:  make(chan struct{}),
+		onMessageCh: make(chan struct{}),
 	}
 
 	err := peer.createPeerConnection(iceServers)
@@ -80,18 +82,30 @@ func (p *Peer) createPeerConnection(iceServers *[]webrtc.ICEServer) error {
 		dc.SetBufferedAmountLowThreshold(BufferedAmountLowThreshold)
 
 		dc.OnBufferedAmountLow(func() {
-			p.sendMoreCh <- struct{}{}
+			select {
+			case p.sendMoreCh <- struct{}{}:
+			default:
+			}
 		})
 
 		dc.OnOpen(func() {
+			logger.Info("dataChannel.OnOpen")
+			if p.onConnect == nil {
+				panic("dataChannel.OnOpen: p.onConnect == nil")
+			}
 			p.onConnect()
 		})
 
 		dc.OnClose(func() {
-			p.onClose()
+			if p.onClose != nil {
+				p.onClose()
+			}
 		})
 
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			if p.onMessage == nil {
+				<-p.onMessageCh
+			}
 			p.onMessage(msg)
 		})
 	})
@@ -152,7 +166,12 @@ func (p *Peer) OnConnect(f func()) {
 }
 
 func (p *Peer) OnMessage(f func(webrtc.DataChannelMessage)) {
+	logger.Info("OnMessage")
 	p.onMessage = f
+	select {
+	case p.onMessageCh <- struct{}{}:
+	default:
+	}
 }
 
 func (p *Peer) threshold() {
@@ -172,4 +191,8 @@ func (p *Peer) Send(data []byte) error {
 func (p *Peer) SendText(s string) error {
 	p.threshold()
 	return p.dataChannel.SendText(s)
+}
+
+func (p *Peer) BufferedAmount() uint64 {
+	return p.dataChannel.BufferedAmount()
 }

@@ -10,6 +10,8 @@ import (
 	"maitian.com/kepler/rtclib/peer"
 )
 
+const MaxBufferLen = 16 * 1024
+
 func main() {
 	var addr string
 	var sendOrRecv string
@@ -58,7 +60,6 @@ func main() {
 					pathCh <- string(dcm.Data)
 				}
 			} else {
-				fmt.Printf("recv %d bytes\n", len(dcm.Data))
 				if sendOrRecv == "recv" {
 					msgCh <- dcm.Data
 				}
@@ -70,16 +71,18 @@ func main() {
 			doneCh <- struct{}{}
 		})
 
-		if sendOrRecv == "" {
-			p.SendText("Helo")
-		} else if sendOrRecv == "send" {
-			sendFile(sendFilePath, p)
-			time.AfterFunc(10*time.Second, func() {
-				host.Close()
-			})
-		} else if sendOrRecv == "recv" {
-			recvFile(pathCh, doneCh, msgCh)
-		}
+		go func() {
+			if sendOrRecv == "" {
+				p.SendText("Helo")
+			} else if sendOrRecv == "send" {
+				sendFile(sendFilePath, p)
+				time.AfterFunc(10*time.Second, func() {
+					p.Close()
+				})
+			} else if sendOrRecv == "recv" {
+				recvFile(pathCh, doneCh, msgCh)
+			}
+		}()
 	})
 
 	err = host.ConnectSignal()
@@ -105,19 +108,33 @@ func sendFile(path string, p *peer.Peer) {
 		return
 	}
 
-	buffer := make([]byte, 16384)
+	buffer := make([]byte, MaxBufferLen)
+	total := 0
 	for {
 		n, err := f.Read(buffer)
 		if err != nil {
 			fmt.Println("Read error:", err)
 			break
 		} else {
+			if n != MaxBufferLen {
+				fmt.Println("Read n:", n)
+			}
 			err = p.Send(buffer[:n])
 			if err != nil {
 				fmt.Println("Send error:", err)
 				break
 			}
+			total += n
 		}
+	}
+	fmt.Println("Send total:", total)
+	for {
+		buffered := p.BufferedAmount()
+		fmt.Println("Buffered:", buffered)
+		if buffered == 0 {
+			break
+		}
+		time.Sleep(time.Second)
 	}
 }
 
@@ -130,16 +147,22 @@ func recvFile(pathCh chan string, doneCh chan struct{}, msgCh chan []byte) {
 	}
 	defer f.Close()
 
+	total := 0
 	for {
 		select {
 		case <-doneCh:
 			fmt.Println("Recv file done.")
+			fmt.Println("Write total:", total)
 			return
 		case msg := <-msgCh:
-			_, err := f.Write(msg)
+			n, err := f.Write(msg)
 			if err != nil {
 				fmt.Println("Write error:", err)
 			}
+			if n != MaxBufferLen {
+				fmt.Println("Write n:", n)
+			}
+			total += n
 		}
 	}
 }

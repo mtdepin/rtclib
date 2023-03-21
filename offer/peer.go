@@ -21,6 +21,7 @@ type Peer struct {
 	candidatesMux     sync.Mutex
 	sendCandidate     func(*webrtc.ICECandidate)
 	onMessage         func(webrtc.DataChannelMessage)
+	onMessageCh       chan struct{}
 	onClose           func()
 	onConnect         func()
 	sendMoreCh        chan struct{}
@@ -29,8 +30,9 @@ type Peer struct {
 func NewPeer(peerId string, iceServers *[]webrtc.ICEServer,
 	sendSdp func(*webrtc.SessionDescription)) (*Peer, error) {
 	peer := Peer{
-		peerId:     peerId,
-		sendMoreCh: make(chan struct{}),
+		peerId:      peerId,
+		sendMoreCh:  make(chan struct{}),
+		onMessageCh: make(chan struct{}),
 	}
 
 	err := peer.createPeerConnection(iceServers, sendSdp)
@@ -85,18 +87,30 @@ func (p *Peer) createPeerConnection(iceServers *[]webrtc.ICEServer,
 
 	dataChannel.SetBufferedAmountLowThreshold(BufferedAmountLowThreshold)
 	dataChannel.OnBufferedAmountLow(func() {
-		p.sendMoreCh <- struct{}{}
+		select {
+		case p.sendMoreCh <- struct{}{}:
+		default:
+		}
 	})
 
 	dataChannel.OnOpen(func() {
+		logger.Info("dataChannel.OnOpen")
+		if p.onConnect == nil {
+			panic("dataChannel.OnOpen: p.onConnect == nil")
+		}
 		p.onConnect()
 	})
 
 	dataChannel.OnClose(func() {
-		p.onClose()
+		if p.onClose != nil {
+			p.onClose()
+		}
 	})
 
 	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+		if p.onMessage == nil {
+			<-p.onMessageCh
+		}
 		p.onMessage(msg)
 	})
 
@@ -143,15 +157,22 @@ func (p *Peer) Close() error {
 }
 
 func (p *Peer) OnClose(f func()) {
+	logger.Info("OnClose")
 	p.onClose = f
 }
 
 func (p *Peer) OnConnect(f func()) {
+	logger.Info("OnConnect")
 	p.onConnect = f
 }
 
 func (p *Peer) OnMessage(f func(webrtc.DataChannelMessage)) {
+	logger.Info("OnMessage")
 	p.onMessage = f
+	select {
+	case p.onMessageCh <- struct{}{}:
+	default:
+	}
 }
 
 func (p *Peer) threshold() {
@@ -171,4 +192,8 @@ func (p *Peer) Send(data []byte) error {
 func (p *Peer) SendText(s string) error {
 	p.threshold()
 	return p.dataChannel.SendText(s)
+}
+
+func (p *Peer) BufferedAmount() uint64 {
+	return p.dataChannel.BufferedAmount()
 }

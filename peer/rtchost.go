@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
@@ -23,22 +25,28 @@ var DefaultICEServer = []webrtc.ICEServer{
 	},
 }
 
+const ReconnectSignalTime = 120
+
 type RTCHost struct {
-	hostId     string
-	signalUrl  string
-	iceServers []webrtc.ICEServer
-	conn       net.Conn
-	peers      map[string]*Peer
-	onPeer     func(*Peer)
-	state      string
+	hostId        string
+	signalUrl     string
+	iceServers    []webrtc.ICEServer
+	conn          net.Conn
+	peers         map[string]*Peer
+	onPeer        func(*Peer)
+	onPeerClose   func(*Peer)
+	onSignalClose func()
+	signalState   string
+	signalMux     sync.Mutex
+	signalTimer   *time.Timer
 }
 
 func NewRTCHost(hostId string, signalUrl string, iceServers *[]webrtc.ICEServer) (*RTCHost, error) {
 	host := RTCHost{
-		hostId:    hostId,
-		signalUrl: signalUrl,
-		peers:     make(map[string]*Peer),
-		state:     "init",
+		hostId:      hostId,
+		signalUrl:   signalUrl,
+		peers:       make(map[string]*Peer),
+		signalState: "init",
 	}
 	if iceServers != nil {
 		host.iceServers = append(host.iceServers, *iceServers...)
@@ -50,39 +58,66 @@ func NewRTCHost(hostId string, signalUrl string, iceServers *[]webrtc.ICEServer)
 }
 
 func (h *RTCHost) ConnectSignal() error {
-	ctx := context.Background()
-
-	conn, _, _, err := ws.DefaultDialer.Dial(ctx, h.signalUrl)
+	_, err := h.createSignalConnect()
 	if err != nil {
 		return err
+	}
+
+	go h.handleSignalConnect()
+
+	return nil
+}
+
+func (h *RTCHost) createSignalConnect() (conn net.Conn, err error) {
+	ctx := context.Background()
+
+	conn, _, _, err = ws.DefaultDialer.Dial(ctx, h.signalUrl)
+	if err != nil {
+		return
 	}
 	h.conn = conn
 
 	err = h.registerToSignal()
 	if err != nil {
 		conn.Close()
-		return err
 	}
 
-	go func() {
-		defer conn.Close()
+	return
+}
 
-		for {
-			data, _, err := wsutil.ReadServerData(h.conn)
-			if err != nil {
-				logger.Info("wsutil.ReadServerData", err)
-				break
-			}
-
-			err = h.handleMessage(data)
-			if err != nil {
-				logger.Info("handleMessage", err)
-				continue
-			}
+func (h *RTCHost) handleSignalConnect() {
+	for {
+		data, _, err := wsutil.ReadServerData(h.conn)
+		if err != nil {
+			logger.Info("wsutil.ReadServerData", err)
+			break
 		}
-	}()
 
-	return nil
+		err = h.handleMessage(data)
+		if err != nil {
+			logger.Info("handleMessage", err)
+			continue
+		}
+	}
+
+	h.conn.Close()
+	h.signalMux.Lock()
+	if h.signalState == "closed" {
+		h.signalMux.Unlock()
+		return
+	}
+	h.signalState = "disconnected"
+	h.signalMux.Unlock()
+	if h.onSignalClose != nil {
+		h.onSignalClose()
+	}
+
+	h.signalTimer = time.AfterFunc(time.Second*ReconnectSignalTime, func() {
+		err := h.ConnectSignal()
+		if err != nil {
+			h.signalTimer.Reset(time.Second * ReconnectSignalTime)
+		}
+	})
 }
 
 func (h *RTCHost) registerToSignal() error {
@@ -111,6 +146,14 @@ func (h *RTCHost) OnPeer(f func(*Peer)) {
 	h.onPeer = f
 }
 
+func (h *RTCHost) OnPeerClose(f func(*Peer)) {
+	h.onPeerClose = f
+}
+
+func (h *RTCHost) OnSignalClose(f func()) {
+	h.onSignalClose = f
+}
+
 func (h *RTCHost) handleMessage(data []byte) error {
 	message := make(map[string]string)
 	err := json.Unmarshal(data, &message)
@@ -134,12 +177,18 @@ func (h *RTCHost) handleMessage(data []byte) error {
 		}
 		if r, ok := message["result"]; ok {
 			if r == "ok" {
-				h.state = "registered"
+				h.signalMux.Lock()
+				h.signalState = "registered"
+				if h.signalTimer != nil {
+					h.signalTimer.Stop()
+					h.signalTimer = nil
+				}
+				h.signalMux.Unlock()
 			}
 		}
 
 	case "connect":
-		err = h.handlePeerConnection(peerId)
+		_, err := h.handlePeerConnection(peerId)
 		if err != nil {
 			return err
 		}
@@ -151,6 +200,7 @@ func (h *RTCHost) handleMessage(data []byte) error {
 		resp["result"] = "ok"
 		err = h.sendToSignal(resp)
 		if err != nil {
+			h.ClosePeer(peerId)
 			return err
 		}
 
@@ -180,19 +230,33 @@ func (h *RTCHost) handleMessage(data []byte) error {
 	return nil
 }
 
-func (h *RTCHost) handlePeerConnection(peerId string) error {
+func (h *RTCHost) handlePeerConnection(peerId string) (*Peer, error) {
 	if _, ok := h.peers[peerId]; ok {
-		return errors.New("peer exist")
+		err := h.ClosePeer(peerId)
+		if err != nil {
+			return nil, err
+		}
 	}
 	peer, err := NewPeer(peerId, &h.iceServers)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	h.peers[peerId] = peer
 	peer.OnConnect(func() {
-		h.onPeer(peer)
+		if h.onPeer != nil {
+			h.onPeer(peer)
+		} else {
+			peer.Close()
+			delete(h.peers, peerId)
+		}
 	})
-	return nil
+	peer.OnClose(func() {
+		if h.onPeerClose != nil {
+			h.onPeerClose(peer)
+		}
+		delete(h.peers, peerId)
+	})
+	return peer, nil
 }
 
 func (h *RTCHost) handleSDP(peerId string, sdp string) error {
@@ -238,15 +302,41 @@ func (h *RTCHost) handleCandidate(peerId string, candidate string) error {
 }
 
 func (h *RTCHost) Close() error {
-	err := h.conn.Close()
+	h.signalMux.Lock()
+	var err error
+	if h.signalState != "closed" {
+		if h.signalState != "disconnected" {
+			err = h.conn.Close()
+		}
+		h.signalState = "closed"
+	}
+	h.signalMux.Unlock()
 	if err != nil {
 		return err
 	}
-	for _, v := range h.peers {
+
+	for k, v := range h.peers {
 		err = v.Close()
 		if err != nil {
 			return err
 		}
+		delete(h.peers, k)
 	}
+
+	return nil
+}
+
+func (h *RTCHost) ClosePeer(peerId string) error {
+	peer, ok := h.peers[peerId]
+	if !ok {
+		return errors.New("peer not exist")
+	}
+
+	err := peer.Close()
+	if err != nil {
+		return err
+	}
+
+	delete(h.peers, peerId)
 	return nil
 }

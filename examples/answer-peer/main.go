@@ -46,12 +46,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	peerDoneChs := make(map[string]chan struct{})
+
 	host.OnPeer(func(p *peer.Peer) {
-		fmt.Println("New peer: ", p.PeerId())
+		peerId := p.PeerId()
+		fmt.Println("New peer: ", peerId)
 
 		doneCh := make(chan struct{})
 		msgCh := make(chan []byte)
 		pathCh := make(chan string)
+		peerDoneChs[peerId] = doneCh
 
 		p.OnMessage(func(dcm webrtc.DataChannelMessage) {
 			if dcm.IsString {
@@ -66,18 +70,13 @@ func main() {
 			}
 		})
 
-		p.OnClose(func() {
-			fmt.Println("Peer Closed")
-			doneCh <- struct{}{}
-		})
-
 		go func() {
 			if sendOrRecv == "" {
 				p.SendText("Helo")
 			} else if sendOrRecv == "send" {
 				sendFile(sendFilePath, p)
 				time.AfterFunc(10*time.Second, func() {
-					p.Close()
+					host.ClosePeer(peerId)
 				})
 			} else if sendOrRecv == "recv" {
 				recvFile(pathCh, doneCh, msgCh)
@@ -85,11 +84,24 @@ func main() {
 		}()
 	})
 
+	host.OnPeerClose(func(p *peer.Peer) {
+		peerId := p.PeerId()
+		fmt.Println("Peer Closed:", peerId)
+		if ch, ok := peerDoneChs[peerId]; ok {
+			close(ch)
+			delete(peerDoneChs, peerId)
+		}
+	})
+
 	err = host.ConnectSignal()
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+
+	host.OnSignalClose(func() {
+		fmt.Println("Signal disconnected")
+	})
 
 	select {}
 }

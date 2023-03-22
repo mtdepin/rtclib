@@ -52,8 +52,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	start := time.Now()
+
 	host.OnPeer(func(p *offer.Peer) {
 		fmt.Println("New peer: ", p.PeerId())
+		timeElapsed := time.Since(start)
+		fmt.Println("Connect peer timeElapsed:", timeElapsed)
 
 		doneCh := make(chan struct{})
 		msgCh := make(chan []byte)
@@ -108,6 +112,8 @@ func sendFile(path string, p *offer.Peer) {
 	}
 	defer f.Close()
 
+	start := time.Now()
+
 	err = p.SendText(path)
 	if err != nil {
 		fmt.Println("SendText error:", err)
@@ -142,6 +148,8 @@ func sendFile(path string, p *offer.Peer) {
 		}
 		time.Sleep(time.Second)
 	}
+	timeElapsed := time.Since(start)
+	fmt.Println("timeElapsed:", timeElapsed)
 }
 
 func recvFile(pathCh chan string, doneCh chan struct{}, msgCh chan []byte) {
@@ -153,12 +161,16 @@ func recvFile(pathCh chan string, doneCh chan struct{}, msgCh chan []byte) {
 	}
 	defer f.Close()
 
+	start := time.Now()
+
 	total := 0
 	for {
 		select {
 		case <-doneCh:
 			fmt.Println("Recv file done.")
 			fmt.Println("Write total:", total)
+			timeElapsed := time.Since(start)
+			fmt.Println("timeElapsed:", timeElapsed)
 			return
 		case msg := <-msgCh:
 			n, err := f.Write(msg)

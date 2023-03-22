@@ -11,6 +11,7 @@ import (
 const (
 	MaxBufferedAmount          = 20 * 1024 * 1024
 	BufferedAmountLowThreshold = 512 * 1024
+	PeerConnectTimeout         = 120
 )
 
 type Peer struct {
@@ -25,6 +26,7 @@ type Peer struct {
 	onClose           func()
 	onConnect         func()
 	sendMoreCh        chan struct{}
+	timer             *time.Timer
 }
 
 func NewPeer(peerId string, iceServers *[]webrtc.ICEServer) (*Peer, error) {
@@ -38,6 +40,10 @@ func NewPeer(peerId string, iceServers *[]webrtc.ICEServer) (*Peer, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	peer.timer = time.AfterFunc(time.Second*PeerConnectTimeout, func() {
+		peer.Close()
+	})
 	return &peer, nil
 }
 
@@ -94,6 +100,7 @@ func (p *Peer) createPeerConnection(iceServers *[]webrtc.ICEServer) error {
 				panic("dataChannel.OnOpen: p.onConnect == nil")
 			}
 			p.onConnect()
+			p.timer.Stop()
 		})
 
 		dc.OnClose(func() {

@@ -95,11 +95,23 @@ func main() {
 		}()
 	})
 
-	err = host.ConnectSignal(peerId)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+	doSignal := func() {
+		err = host.ConnectSignal(peerId)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 	}
+
+	host.OnClose(func() {
+		if host.State == "iceFail" {
+			doSignal()
+		} else {
+			os.Exit(0)
+		}
+	})
+
+	doSignal()
 
 	select {}
 }

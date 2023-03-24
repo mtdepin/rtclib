@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ const (
 	MaxBufferedAmount          = 20 * 1024 * 1024
 	BufferedAmountLowThreshold = 512 * 1024
 	PeerConnectTimeout         = 120
+	MaxICERestartCount         = 5
 )
 
 type Peer struct {
@@ -20,6 +22,7 @@ type Peer struct {
 	dataChannel       *webrtc.DataChannel
 	pendingCandidates []*webrtc.ICECandidate
 	candidatesMux     sync.Mutex
+	sendSdp           func(*webrtc.SessionDescription)
 	sendCandidate     func(*webrtc.ICECandidate)
 	onMessage         func(webrtc.DataChannelMessage)
 	onMessageCh       chan struct{}
@@ -27,6 +30,7 @@ type Peer struct {
 	onConnect         func()
 	sendMoreCh        chan struct{}
 	timer             *time.Timer
+	Ctx               context.Context
 }
 
 func NewPeer(peerId string, iceServers *[]webrtc.ICEServer) (*Peer, error) {
@@ -78,9 +82,18 @@ func (p *Peer) createPeerConnection(iceServers *[]webrtc.ICEServer) error {
 	})
 
 	pc.OnConnectionStateChange(func(pcs webrtc.PeerConnectionState) {
+		logger.Info("PeerConnectionState:", pcs.String())
 		if pcs == webrtc.PeerConnectionStateFailed {
 			pc.Close()
 		}
+	})
+
+	pc.OnICEConnectionStateChange(func(is webrtc.ICEConnectionState) {
+		logger.Info("ICEConnectionState:", is.String())
+	})
+
+	pc.OnICEGatheringStateChange(func(is webrtc.ICEGathererState) {
+		logger.Info("ICEGathererState:", is.String())
 	})
 
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
@@ -131,24 +144,28 @@ func (p *Peer) SetRemoteDescription(sdp webrtc.SessionDescription,
 	if err != nil {
 		return err
 	}
+	p.sendSdp = sendSdp
+	p.sendCandidate = sendCandidate
+	return p.createAnswer()
+}
 
+func (p *Peer) createAnswer() error {
+	pc := p.peerConnection
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
 		return err
 	}
-	logger.Info("CreateAnswer", answer)
 
 	err = pc.SetLocalDescription(answer)
 	if err != nil {
 		return err
 	}
 
-	sendSdp(&answer)
+	p.sendSdp(&answer)
 
 	for _, c := range p.pendingCandidates {
-		sendCandidate(c)
+		p.sendCandidate(c)
 	}
-	p.sendCandidate = sendCandidate
 	return nil
 }
 

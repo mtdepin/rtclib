@@ -33,6 +33,7 @@ type RTCHost struct {
 	iceServers    []webrtc.ICEServer
 	conn          net.Conn
 	peers         map[string]*Peer
+	peersMux      sync.Mutex
 	onPeer        func(*Peer)
 	onPeerClose   func(*Peer)
 	onSignalClose func()
@@ -230,6 +231,18 @@ func (h *RTCHost) handleMessage(data []byte) error {
 	return nil
 }
 
+func (h *RTCHost) addPeer(peer *Peer) {
+	h.peersMux.Lock()
+	defer h.peersMux.Unlock()
+	h.peers[peer.PeerId()] = peer
+}
+
+func (h *RTCHost) removePeer(peerId string) {
+	h.peersMux.Lock()
+	defer h.peersMux.Unlock()
+	delete(h.peers, peerId)
+}
+
 func (h *RTCHost) handlePeerConnection(peerId string) (*Peer, error) {
 	if _, ok := h.peers[peerId]; ok {
 		err := h.ClosePeer(peerId)
@@ -241,20 +254,20 @@ func (h *RTCHost) handlePeerConnection(peerId string) (*Peer, error) {
 	if err != nil {
 		return nil, err
 	}
-	h.peers[peerId] = peer
+	h.addPeer(peer)
 	peer.OnConnect(func() {
 		if h.onPeer != nil {
 			h.onPeer(peer)
 		} else {
 			peer.Close()
-			delete(h.peers, peerId)
+			h.removePeer(peerId)
 		}
 	})
 	peer.OnClose(func() {
 		if h.onPeerClose != nil {
 			h.onPeerClose(peer)
 		}
-		delete(h.peers, peerId)
+		h.removePeer(peerId)
 	})
 	return peer, nil
 }
@@ -315,6 +328,8 @@ func (h *RTCHost) Close() error {
 		return err
 	}
 
+	h.peersMux.Lock()
+	defer h.peersMux.Unlock()
 	for k, v := range h.peers {
 		err = v.Close()
 		if err != nil {
@@ -327,6 +342,8 @@ func (h *RTCHost) Close() error {
 }
 
 func (h *RTCHost) ClosePeer(peerId string) error {
+	h.peersMux.Lock()
+	defer h.peersMux.Unlock()
 	peer, ok := h.peers[peerId]
 	if !ok {
 		return errors.New("peer not exist")

@@ -124,17 +124,18 @@ func sendFile(path string, p *peer.Peer) {
 
 	buffer := make([]byte, MaxBufferLen)
 	total := 0
+	var sendErr error
 	for {
-		n, err := f.Read(buffer)
-		if err != nil {
+		n, sendErr := f.Read(buffer)
+		if sendErr != nil {
 			fmt.Println("Read error:", err)
 			break
 		} else {
 			if n != MaxBufferLen {
 				fmt.Println("Read n:", n)
 			}
-			err = p.Send(buffer[:n])
-			if err != nil {
+			sendErr = p.Send(buffer[:n])
+			if sendErr != nil {
 				fmt.Println("Send error:", err)
 				break
 			}
@@ -142,6 +143,9 @@ func sendFile(path string, p *peer.Peer) {
 		}
 	}
 	fmt.Println("Send total:", total)
+	if sendErr != nil {
+		return
+	}
 	for {
 		buffered := p.BufferedAmount()
 		fmt.Println("Buffered:", buffered)

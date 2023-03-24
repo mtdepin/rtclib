@@ -24,6 +24,7 @@ type Peer struct {
 	onMessageCh       chan struct{}
 	onClose           func()
 	onConnect         func()
+	onIceConnectFail  func()
 	sendMoreCh        chan struct{}
 }
 
@@ -74,9 +75,27 @@ func (p *Peer) createPeerConnection(iceServers *[]webrtc.ICEServer,
 	})
 
 	pc.OnConnectionStateChange(func(pcs webrtc.PeerConnectionState) {
+		logger.Info("PeerConnectionState:", pcs.String())
 		if pcs == webrtc.PeerConnectionStateFailed {
 			pc.Close()
+		} else if pcs == webrtc.PeerConnectionStateClosed {
+			if p.onClose != nil {
+				p.onClose()
+			}
 		}
+	})
+
+	pc.OnICEConnectionStateChange(func(is webrtc.ICEConnectionState) {
+		logger.Info("ICEConnectionState:", is.String())
+		if is == webrtc.ICEConnectionStateFailed {
+			if p.onIceConnectFail != nil {
+				p.onIceConnectFail()
+			}
+		}
+	})
+
+	pc.OnICEGatheringStateChange(func(is webrtc.ICEGathererState) {
+		logger.Info("ICEGathererState:", is.String())
 	})
 
 	dataChannel, err := pc.CreateDataChannel("data", nil)
@@ -164,6 +183,10 @@ func (p *Peer) OnClose(f func()) {
 func (p *Peer) OnConnect(f func()) {
 	logger.Info("OnConnect")
 	p.onConnect = f
+}
+
+func (p *Peer) OnIceConnectFail(f func()) {
+	p.onIceConnectFail = f
 }
 
 func (p *Peer) OnMessage(f func(webrtc.DataChannelMessage)) {

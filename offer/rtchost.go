@@ -30,14 +30,15 @@ type RTCHost struct {
 	conn       net.Conn
 	peer       *Peer
 	onPeer     func(*Peer)
-	state      string
+	onClose    func()
+	State      string
 }
 
 func NewRTCHost(hostId string, signalUrl string, iceServers *[]webrtc.ICEServer) (*RTCHost, error) {
 	host := RTCHost{
 		hostId:    hostId,
 		signalUrl: signalUrl,
-		state:     "init",
+		State:     "init",
 	}
 	if iceServers != nil {
 		host.iceServers = append(host.iceServers, *iceServers...)
@@ -111,6 +112,10 @@ func (h *RTCHost) OnPeer(f func(*Peer)) {
 	h.onPeer = f
 }
 
+func (h *RTCHost) OnClose(f func()) {
+	h.onClose = f
+}
+
 func (h *RTCHost) handleMessage(data []byte) error {
 	message := make(map[string]string)
 	err := json.Unmarshal(data, &message)
@@ -131,7 +136,7 @@ func (h *RTCHost) handleMessage(data []byte) error {
 	case "accept":
 		if r, ok := message["result"]; ok {
 			if r == "ok" {
-				h.state = "accepted"
+				h.State = "accepted"
 			}
 		}
 
@@ -183,6 +188,19 @@ func (h *RTCHost) createPeer(peerId string) error {
 		h.onPeer(peer)
 	})
 
+	peer.OnIceConnectFail(func() {
+		peer.Close()
+		h.peer = nil
+		h.State = "iceFail"
+	})
+
+	peer.OnClose(func() {
+		h.Close()
+		if h.onClose != nil {
+			h.onClose()
+		}
+	})
+
 	h.peer = peer
 	return nil
 }
@@ -224,6 +242,8 @@ func (h *RTCHost) Close() error {
 	if err != nil {
 		return err
 	}
-	err = h.peer.Close()
+	if h.peer != nil {
+		err = h.peer.Close()
+	}
 	return err
 }

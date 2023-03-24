@@ -31,6 +31,7 @@ type Peer struct {
 	sendMoreCh        chan struct{}
 	timer             *time.Timer
 	Ctx               context.Context
+	Cancel            context.CancelFunc
 }
 
 func NewPeer(peerId string, iceServers *[]webrtc.ICEServer) (*Peer, error) {
@@ -38,6 +39,7 @@ func NewPeer(peerId string, iceServers *[]webrtc.ICEServer) (*Peer, error) {
 		peerId:      peerId,
 		sendMoreCh:  make(chan struct{}),
 		onMessageCh: make(chan struct{}),
+		Ctx:         context.Background(),
 	}
 
 	err := peer.createPeerConnection(iceServers)

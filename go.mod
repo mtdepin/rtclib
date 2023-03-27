@@ -1,6 +1,6 @@
 module gitlab.mty.wang/kepler/rtclib
 
-go 1.20
+go 1.18
 
 require github.com/pion/webrtc/v3 v3.1.58
 

@@ -2,10 +2,11 @@ package logger
 
 import (
 	"fmt"
-	"github.com/rs/zerolog"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 var log zerolog.Logger
@@ -50,7 +51,8 @@ func Infof(format string, v ...interface{}) {
 
 func Info(v ...interface{}) {
 	strs := fmt.Sprint(v...)
-	log.Info().Msg(strs)
+	//log.Info().Msg(strs)
+	fmt.Println(strs)
 }
 
 func Debugf(format string, v ...interface{}) {

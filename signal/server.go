@@ -59,7 +59,8 @@ func (s *SignalServer) Start() error {
 			logger.Info("UpgradeHTTP:", err)
 			return
 		}
-		logger.Info("UpgradeHTTP:", conn.RemoteAddr().String())
+		remoteAddr := conn.RemoteAddr().String()
+		logger.Info("UpgradeHTTP:", remoteAddr)
 
 		go func() {
 			defer conn.Close()
@@ -67,13 +68,13 @@ func (s *SignalServer) Start() error {
 			for {
 				msg, op, err := wsutil.ReadClientData(conn)
 				if err != nil {
-					logger.Info("wsutil.ReadClientData:", err)
+					logger.Error("wsutil.ReadClientData:", err, remoteAddr)
 					break
 				}
 
 				err = s.handleMessage(msg, conn, op)
 				if err != nil {
-					logger.Info("handleMessage:", err)
+					logger.Error("handleMessage:", err, remoteAddr)
 					continue
 				}
 			}

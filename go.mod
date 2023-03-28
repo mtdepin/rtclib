@@ -1,6 +1,6 @@
 module gitlab.mty.wang/kepler/rtclib
 
-go 1.18
+go 1.20
 
 require github.com/pion/webrtc/v3 v3.1.58
 
@@ -35,3 +35,5 @@ require (
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/sys v0.5.0 // indirect
 )
+
+replace github.com/pion/sctp v1.8.6 => github.com/yann-y/sctp v1.8.6

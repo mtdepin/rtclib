@@ -13,13 +13,13 @@ import (
 
 type AnswerPeer struct {
 	peerId   string
-	seesions sync.Map
+	sessions sync.Map
 	conn     net.Conn
 	wsOp     ws.OpCode
 }
 
 func (p *AnswerPeer) destroy() {
-	p.seesions.Range(func(key, value any) bool {
+	p.sessions.Range(func(key, value any) bool {
 		if peer, ok := value.(*Session); ok {
 			peer.destroy()
 		}
@@ -28,7 +28,7 @@ func (p *AnswerPeer) destroy() {
 	p.conn.Close()
 }
 func (p *AnswerPeer) getSession(peerId string) (*Session, bool) {
-	if value, ok := p.seesions.Load(peerId); ok {
+	if value, ok := p.sessions.Load(peerId); ok {
 		if peer, ok := value.(*Session); ok {
 			return peer, ok
 		}
@@ -36,10 +36,10 @@ func (p *AnswerPeer) getSession(peerId string) (*Session, bool) {
 	return nil, false
 }
 func (p *AnswerPeer) deleteSession(peerId string) {
-	p.seesions.Delete(peerId)
+	p.sessions.Delete(peerId)
 }
 func (p *AnswerPeer) storeSession(peerId string, v *Session) {
-	p.seesions.Store(peerId, v)
+	p.sessions.Store(peerId, v)
 }
 
 type Session struct {

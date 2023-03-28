@@ -8,20 +8,38 @@ import (
 	"gitlab.mty.wang/kepler/rtclib/logger"
 	"net"
 	"net/http"
+	"sync"
 )
 
 type AnswerPeer struct {
 	peerId   string
-	seesions map[string]*Session
+	seesions sync.Map
 	conn     net.Conn
 	wsOp     ws.OpCode
 }
 
 func (p *AnswerPeer) destroy() {
-	for _, v := range p.seesions {
-		v.destroy()
-	}
+	p.seesions.Range(func(key, value any) bool {
+		if peer, ok := value.(*Session); ok {
+			peer.destroy()
+		}
+		return true
+	})
 	p.conn.Close()
+}
+func (p *AnswerPeer) getSession(peerId string) (*Session, bool) {
+	if value, ok := p.seesions.Load(peerId); ok {
+		if peer, ok := value.(*Session); ok {
+			return peer, ok
+		}
+	}
+	return nil, false
+}
+func (p *AnswerPeer) deleteSession(peerId string) {
+	p.seesions.Delete(peerId)
+}
+func (p *AnswerPeer) storeSession(peerId string, v *Session) {
+	p.seesions.Store(peerId, v)
 }
 
 type Session struct {
@@ -45,13 +63,12 @@ func (s *Session) getRemoteAddr() string {
 }
 
 type SignalServer struct {
-	peers    map[string]*AnswerPeer
+	peers    sync.Map
 	bindAddr string
 }
 
 func NewSignalServer(bindAddr string) *SignalServer {
 	s := SignalServer{
-		peers:    make(map[string]*AnswerPeer),
 		bindAddr: bindAddr,
 	}
 	return &s
@@ -87,11 +104,27 @@ func (s *SignalServer) Start() error {
 }
 
 func (s *SignalServer) Close() {
-	for _, v := range s.peers {
-		v.destroy()
-	}
+	s.peers.Range(func(key, value any) bool {
+		if peer, ok := value.(*AnswerPeer); ok {
+			peer.destroy()
+		}
+		return true
+	})
 }
-
+func (s *SignalServer) getPeer(peerId string) (*AnswerPeer, bool) {
+	if value, ok := s.peers.Load(peerId); ok {
+		if peer, ok := value.(*AnswerPeer); ok {
+			return peer, ok
+		}
+	}
+	return nil, false
+}
+func (s *SignalServer) deletePeer(peerId string) {
+	s.peers.Delete(peerId)
+}
+func (s *SignalServer) storePeer(peerId string, v *AnswerPeer) {
+	s.peers.Store(peerId, v)
+}
 func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode) error {
 	message := make(map[string]string, 0)
 	err := json.Unmarshal(data, &message)
@@ -110,17 +143,16 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 	}
 	switch op {
 	case "register":
-		if p, ok := s.peers[peerId]; ok {
+		if p, ok := s.getPeer(peerId); ok {
 			p.destroy()
-			delete(s.peers, peerId)
+			s.deletePeer(peerId)
 		}
 		peer := AnswerPeer{
-			peerId:   peerId,
-			seesions: make(map[string]*Session),
+			peerId: peerId,
 		}
 		peer.conn = conn
 		peer.wsOp = wsOp
-		s.peers[peerId] = &peer
+		s.storePeer(peerId, &peer)
 
 		resp := make(map[string]string)
 		resp["peerId"] = peerId
@@ -140,7 +172,7 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 		if !ok {
 			return errors.New("invalid data")
 		}
-		peer, ok := s.peers[answerId]
+		peer, ok := s.getPeer(answerId)
 		if !ok {
 			return errors.New("peer not exist")
 		}
@@ -156,11 +188,11 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 		if err != nil {
 			return err
 		}
-		if s, ok := peer.seesions[peerId]; ok {
+		if s, ok := peer.getSession(peerId); ok {
 			if conn.RemoteAddr().String() != s.getRemoteAddr() {
 				logger.Warnf("The peerId address has changed,old %s --->now  %s", s.getRemoteAddr(), conn.RemoteAddr().String())
 				s.destroy()
-				delete(peer.seesions, peerId)
+				peer.deleteSession(peerId)
 			}
 		}
 		sess := Session{
@@ -170,19 +202,18 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 			offerWsOp: wsOp,
 			state:     "init",
 		}
-		peer.seesions[peerId] = &sess
+		peer.storeSession(peerId, &sess)
 
 	case "accept":
 		offerId, ok := message["offerId"]
 		if !ok {
 			return errors.New("invalid data")
 		}
-
-		answer, ok := s.peers[peerId]
+		answer, ok := s.getPeer(peerId)
 		if !ok {
 			return errors.New("peer not exist")
 		}
-		sess, ok := answer.seesions[offerId]
+		sess, ok := answer.getSession(offerId)
 		if !ok {
 			return errors.New("peer not exist")
 		}
@@ -212,11 +243,11 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 		}
 
 		if offerId, ok := message["offerId"]; ok {
-			answer, ok := s.peers[peerId]
+			answer, ok := s.getPeer(peerId)
 			if !ok {
 				return errors.New("peer not exist")
 			}
-			sess, ok := answer.seesions[offerId]
+			sess, ok := answer.getSession(offerId)
 			if !ok {
 				return errors.New("peer not exist")
 			}
@@ -234,11 +265,11 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 				return err
 			}
 		} else if answerId, ok := message["answerId"]; ok {
-			answer, ok := s.peers[answerId]
+			answer, ok := s.getPeer(answerId)
 			if !ok {
 				return errors.New("peer not exist")
 			}
-			sess, ok := answer.seesions[peerId]
+			sess, ok := answer.getSession(peerId)
 			if !ok {
 				return errors.New("peer not exist")
 			}
@@ -267,11 +298,11 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 		}
 
 		if offerId, ok := message["offerId"]; ok {
-			answer, ok := s.peers[peerId]
+			answer, ok := s.getPeer(peerId)
 			if !ok {
 				return errors.New("peer not exist")
 			}
-			sess, ok := answer.seesions[offerId]
+			sess, ok := answer.getSession(offerId)
 			if !ok {
 				return errors.New("peer not exist")
 			}
@@ -289,11 +320,11 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 				return err
 			}
 		} else if answerId, ok := message["answerId"]; ok {
-			answer, ok := s.peers[answerId]
+			answer, ok := s.getPeer(answerId)
 			if !ok {
 				return errors.New("peer not exist")
 			}
-			sess, ok := answer.seesions[peerId]
+			sess, ok := answer.getSession(peerId)
 			if !ok {
 				return errors.New("peer not exist")
 			}

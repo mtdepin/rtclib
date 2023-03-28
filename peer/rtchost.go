@@ -25,7 +25,7 @@ var DefaultICEServer = []webrtc.ICEServer{
 	},
 }
 
-const ReconnectSignalTime = 120
+const ReconnectSignalTime = 30
 
 type RTCHost struct {
 	hostId        string

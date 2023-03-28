@@ -13,7 +13,6 @@ const (
 	MaxBufferedAmount          = 20 * 1024 * 1024
 	BufferedAmountLowThreshold = 512 * 1024
 	PeerConnectTimeout         = 120
-	MaxICERestartCount         = 5
 )
 
 type Peer struct {

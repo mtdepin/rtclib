@@ -2,76 +2,49 @@ package logger
 
 import (
 	"fmt"
-	"os"
 	"sync"
-	"time"
 
-	"github.com/rs/zerolog"
+	"github.com/pion/logging"
 )
 
-var log zerolog.Logger
+var loggerFactory logging.LoggerFactory
+var log logging.LeveledLogger
 var once sync.Once
-
-type Level uint8
-
-const (
-	DebugLevel Level = iota
-
-	InfoLevel
-
-	WarnLevel
-
-	ErrorLevel
-
-	FatalLevel
-
-	PanicLevel
-
-	NoLevel
-
-	Disabled
-)
 
 func init() {
 	once.Do(func() {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
-		log = zerolog.New(output).With().Timestamp().Logger()
-		SetLevel(DebugLevel)
+		loggerFactory = logging.NewDefaultLoggerFactory()
+		log = loggerFactory.NewLogger("rtclib")
 	})
 }
 
-func SetLevel(l Level) {
-	zerolog.SetGlobalLevel(zerolog.Level(l))
-}
-
 func Infof(format string, v ...interface{}) {
-	log.Info().Msgf(format, v...)
+	log.Infof(format, v)
 }
 
 func Info(v ...interface{}) {
 	strs := fmt.Sprint(v...)
-	//log.Info().Msg(strs)
-	fmt.Println(strs)
+	log.Info(strs)
 }
 
 func Debugf(format string, v ...interface{}) {
-	log.Debug().Msgf(format, v...)
+	log.Debugf(format, v)
 }
 
 func Warnf(format string, v ...interface{}) {
-	log.Warn().Msgf(format, v...)
+	log.Warnf(format, v)
+}
+
+func Warn(v ...interface{}) {
+	strs := fmt.Sprint(v...)
+	log.Warn(strs)
 }
 
 func Error(v ...interface{}) {
 	strs := fmt.Sprintln(v...)
-	log.Error().Msg(strs)
+	log.Error(strs)
 }
 
 func Errorf(format string, v ...interface{}) {
-	log.Error().Msgf(format, v...)
-}
-
-func Panicf(format string, v ...interface{}) {
-	log.Panic().Msgf(format, v...)
+	log.Errorf(format, v)
 }

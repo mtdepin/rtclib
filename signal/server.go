@@ -3,12 +3,11 @@ package signal
 import (
 	"encoding/json"
 	"errors"
-	"net"
-	"net/http"
-
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 	"gitlab.mty.wang/kepler/rtclib/logger"
+	"net"
+	"net/http"
 )
 
 type AnswerPeer struct {
@@ -38,6 +37,12 @@ func (s *Session) destroy() {
 		s.offerConn.Close()
 	}
 }
+func (s *Session) getRemoteAddr() string {
+	if s.offerConn != nil {
+		return s.offerConn.RemoteAddr().String()
+	}
+	return ""
+}
 
 type SignalServer struct {
 	peers    map[string]*AnswerPeer
@@ -61,17 +66,14 @@ func (s *SignalServer) Start() error {
 		}
 		remoteAddr := conn.RemoteAddr().String()
 		logger.Info("UpgradeHTTP:", remoteAddr)
-
 		go func() {
 			defer conn.Close()
-
 			for {
 				msg, op, err := wsutil.ReadClientData(conn)
 				if err != nil {
 					logger.Error("wsutil.ReadClientData:", err, remoteAddr)
 					break
 				}
-
 				err = s.handleMessage(msg, conn, op)
 				if err != nil {
 					logger.Error("handleMessage:", err, remoteAddr)
@@ -154,10 +156,12 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 		if err != nil {
 			return err
 		}
-
 		if s, ok := peer.seesions[peerId]; ok {
-			s.destroy()
-			delete(peer.seesions, peerId)
+			if conn.RemoteAddr().String() != s.getRemoteAddr() {
+				logger.Warnf("The peerId address has changed,old %s --->now  %s", s.getRemoteAddr(), conn.RemoteAddr().String())
+				s.destroy()
+				delete(peer.seesions, peerId)
+			}
 		}
 		sess := Session{
 			answerId:  answerId,

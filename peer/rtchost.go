@@ -32,8 +32,7 @@ type RTCHost struct {
 	signalUrl     string
 	iceServers    []webrtc.ICEServer
 	conn          net.Conn
-	peers         map[string]*Peer
-	peersMux      sync.Mutex
+	peers         sync.Map
 	onPeer        func(*Peer)
 	onPeerClose   func(*Peer)
 	onSignalClose func()
@@ -46,7 +45,6 @@ func NewRTCHost(hostId string, signalUrl string, iceServers *[]webrtc.ICEServer)
 	host := RTCHost{
 		hostId:      hostId,
 		signalUrl:   signalUrl,
-		peers:       make(map[string]*Peer),
 		signalState: "init",
 	}
 	if iceServers != nil {
@@ -59,6 +57,14 @@ func NewRTCHost(hostId string, signalUrl string, iceServers *[]webrtc.ICEServer)
 }
 
 func (h *RTCHost) ConnectSignal() error {
+	h.signalMux.Lock()
+	if h.signalState == "connecting" {
+		h.signalMux.Unlock()
+		return nil
+	}
+	h.signalState = "connecting"
+	h.signalMux.Unlock()
+
 	_, err := h.createSignalConnect()
 	if err != nil {
 		return err
@@ -232,19 +238,15 @@ func (h *RTCHost) handleMessage(data []byte) error {
 }
 
 func (h *RTCHost) addPeer(peer *Peer) {
-	h.peersMux.Lock()
-	defer h.peersMux.Unlock()
-	h.peers[peer.PeerId()] = peer
+	h.peers.Store(peer.PeerId(), peer)
 }
 
 func (h *RTCHost) removePeer(peerId string) {
-	h.peersMux.Lock()
-	defer h.peersMux.Unlock()
-	delete(h.peers, peerId)
+	h.peers.Delete(peerId)
 }
 
 func (h *RTCHost) handlePeerConnection(peerId string) (*Peer, error) {
-	if _, ok := h.peers[peerId]; ok {
+	if _, ok := h.peers.Load(peerId); ok {
 		err := h.ClosePeer(peerId)
 		if err != nil {
 			return nil, err
@@ -273,10 +275,11 @@ func (h *RTCHost) handlePeerConnection(peerId string) (*Peer, error) {
 }
 
 func (h *RTCHost) handleSDP(peerId string, sdp string) error {
-	peer, ok := h.peers[peerId]
+	value, ok := h.peers.Load(peerId)
 	if !ok {
 		return errors.New("peer not exist")
 	}
+	peer := value.(*Peer)
 
 	s := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: sdp}
 	err := peer.SetRemoteDescription(s, func(sd *webrtc.SessionDescription) {
@@ -302,10 +305,11 @@ func (h *RTCHost) handleSDP(peerId string, sdp string) error {
 }
 
 func (h *RTCHost) handleCandidate(peerId string, candidate string) error {
-	peer, ok := h.peers[peerId]
+	value, ok := h.peers.Load(peerId)
 	if !ok {
 		return errors.New("peer not exist")
 	}
+	peer := value.(*Peer)
 
 	err := peer.AddICECandidate(candidate)
 	if err != nil {
@@ -328,32 +332,34 @@ func (h *RTCHost) Close() error {
 		return err
 	}
 
-	h.peersMux.Lock()
-	defer h.peersMux.Unlock()
-	for k, v := range h.peers {
-		err = v.Close()
+	h.peers.Range(func(key, value any) bool {
+		peer := value.(*Peer)
+		err = peer.Close()
 		if err != nil {
-			return err
+			return false
 		}
-		delete(h.peers, k)
+		h.peers.Delete(key)
+		return true
+	})
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func (h *RTCHost) ClosePeer(peerId string) error {
-	h.peersMux.Lock()
-	defer h.peersMux.Unlock()
-	peer, ok := h.peers[peerId]
+	value, ok := h.peers.Load(peerId)
 	if !ok {
 		return errors.New("peer not exist")
 	}
+	peer := value.(*Peer)
 
 	err := peer.Close()
 	if err != nil {
 		return err
 	}
 
-	delete(h.peers, peerId)
+	h.peers.Delete(peerId)
 	return nil
 }

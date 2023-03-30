@@ -32,3 +32,5 @@ require (
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/sys v0.5.0 // indirect
 )
+
+replace github.com/pion/sctp v1.8.6 => github.com/yann-y/sctp v1.8.6

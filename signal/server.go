@@ -3,12 +3,16 @@ package signal
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 	"gitlab.mty.wang/kepler/rtclib/logger"
-	"net"
-	"net/http"
-	"sync"
 )
 
 type AnswerPeer struct {
@@ -296,6 +300,23 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 		if !ok {
 			return errors.New("invalid data")
 		}
+		// candidate => candidate:3951633107 1 udp 1694498815 120.242.254.172 44575 typ srflx raddr 0.0.0.0 rport 40819
+
+		candidates := []string{candidate}
+		if strings.Contains(candidate, "srflx") {
+			a := strings.Split(candidate, " ")
+			portStr := a[5]
+			port, err := strconv.Atoi(portStr)
+			if err == nil {
+				for i := 0; i < 10; i++ {
+					c := candidate + ""
+					port += 1
+					c = strings.Replace(c, portStr, strconv.Itoa(port), 1)
+					fmt.Println("dup candidate:", c)
+					candidates = append(candidates, c)
+				}
+			}
+		}
 
 		if offerId, ok := message["offerId"]; ok {
 			answer, ok := s.getPeer(peerId)
@@ -307,17 +328,19 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 				return errors.New("peer not exist")
 			}
 
-			resp := make(map[string]string)
-			resp["peerId"] = peerId
-			resp["op"] = "candidate"
-			resp["candidate"] = candidate
-			respData, err := json.Marshal(resp)
-			if err != nil {
-				return err
-			}
-			err = wsutil.WriteServerMessage(sess.offerConn, sess.offerWsOp, respData)
-			if err != nil {
-				return err
+			for _, c := range candidates {
+				resp := make(map[string]string)
+				resp["peerId"] = peerId
+				resp["op"] = "candidate"
+				resp["candidate"] = c
+				respData, err := json.Marshal(resp)
+				if err != nil {
+					return err
+				}
+				err = wsutil.WriteServerMessage(sess.offerConn, sess.offerWsOp, respData)
+				if err != nil {
+					return err
+				}
 			}
 		} else if answerId, ok := message["answerId"]; ok {
 			answer, ok := s.getPeer(answerId)
@@ -332,17 +355,19 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 				return errors.New("invalid data")
 			}
 
-			resp := make(map[string]string)
-			resp["peerId"] = peerId
-			resp["op"] = "candidate"
-			resp["candidate"] = candidate
-			respData, err := json.Marshal(resp)
-			if err != nil {
-				return err
-			}
-			err = wsutil.WriteServerMessage(answer.conn, answer.wsOp, respData)
-			if err != nil {
-				return err
+			for _, c := range candidates {
+				resp := make(map[string]string)
+				resp["peerId"] = peerId
+				resp["op"] = "candidate"
+				resp["candidate"] = c
+				respData, err := json.Marshal(resp)
+				if err != nil {
+					return err
+				}
+				err = wsutil.WriteServerMessage(answer.conn, answer.wsOp, respData)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}

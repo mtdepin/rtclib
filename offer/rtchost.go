@@ -172,7 +172,7 @@ func (h *RTCHost) handleMessage(data []byte) error {
 }
 
 func (h *RTCHost) createPeer(peerId string) error {
-	peer, err := NewPeer(peerId, &DefaultICEServer, func(sd *webrtc.SessionDescription) {
+	peer, err := NewPeer(peerId, &h.iceServers, func(sd *webrtc.SessionDescription) {
 		message := make(map[string]string)
 		message["peerId"] = h.hostId
 		message["op"] = "sdp"
@@ -195,6 +195,8 @@ func (h *RTCHost) createPeer(peerId string) error {
 	})
 
 	peer.OnClose(func() {
+		logger.Info("peer.OnClose")
+		h.peer = nil
 		h.Close()
 		if h.onClose != nil {
 			h.onClose()
@@ -238,11 +240,13 @@ func (h *RTCHost) handleCandidate(peerId string, candidate string) error {
 }
 
 func (h *RTCHost) Close() error {
+	logger.Info("h.Close")
 	err := h.conn.Close()
 	if err != nil {
 		return err
 	}
 	if h.peer != nil {
+		logger.Info("peer.Close")
 		err = h.peer.Close()
 	}
 	return err

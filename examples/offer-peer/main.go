@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 )
 
 const MaxBufferLen = 16 * 1024
+const ICEConfigFile = "ice_servers.json"
 
 func main() {
 	var addr string
@@ -46,7 +49,12 @@ func main() {
 	uid := uuid.New()
 	hostId := uid.String()
 
-	host, err := offer.NewRTCHost(hostId, addr, nil)
+	iceServers, err := readIceConfig(ICEConfigFile)
+	if err != nil {
+		fmt.Println("readIceConfig error:", err)
+	}
+
+	host, err := offer.NewRTCHost(hostId, addr, iceServers)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -195,4 +203,39 @@ func recvFile(pathCh chan string, doneCh chan struct{}, msgCh chan []byte) {
 			total += n
 		}
 	}
+}
+
+type IceServerConfig struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+}
+
+type IceServersConfig struct {
+	IceServers []IceServerConfig `json:"ice_servers"`
+}
+
+func readIceConfig(path string) (*[]webrtc.ICEServer, error) {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	conf := IceServersConfig{}
+	err = json.Unmarshal(data, &conf)
+	if err != nil {
+		return nil, err
+	}
+
+	iceServers := []webrtc.ICEServer{}
+	for _, server := range conf.IceServers {
+		iceServer := webrtc.ICEServer{
+			URLs:       server.URLs,
+			Username:   server.Username,
+			Credential: server.Credential,
+		}
+		iceServers = append(iceServers, iceServer)
+	}
+
+	return &iceServers, nil
 }

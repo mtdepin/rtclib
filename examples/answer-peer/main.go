@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 )
 
 const MaxBufferLen = 16 * 1024
+const ICEConfigFile = "ice_servers.json"
 
 func main() {
 	var addr string
@@ -40,7 +43,12 @@ func main() {
 	uid := uuid.New()
 	hostId := uid.String()
 
-	host, err := peer.NewRTCHost(hostId, addr, nil)
+	iceServers, err := readIceConfig(ICEConfigFile)
+	if err != nil {
+		fmt.Println("readIceConfig error:", err)
+	}
+
+	host, err := peer.NewRTCHost(hostId, addr, iceServers)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -64,7 +72,7 @@ func main() {
 					pathCh <- string(dcm.Data)
 				}
 			} else {
-				if sendOrRecv == "recv" {
+				if sendOrRecv != "send" {
 					msgCh <- dcm.Data
 				}
 			}
@@ -73,6 +81,19 @@ func main() {
 		go func() {
 			if sendOrRecv == "" {
 				p.SendText("Helo")
+
+				total := 0
+				for {
+					select {
+					case <-doneCh:
+						fmt.Println("recv total:", total)
+						return
+					case msg := <-msgCh:
+						n := len(msg)
+						fmt.Println(time.Now().Format("2006-01-02 15:04:05"), "recv:", n, total)
+						total += n
+					}
+				}
 			} else if sendOrRecv == "send" {
 				sendFile(sendFilePath, p)
 				time.AfterFunc(10*time.Second, func() {
@@ -189,4 +210,39 @@ func recvFile(pathCh chan string, doneCh chan struct{}, msgCh chan []byte) {
 			total += n
 		}
 	}
+}
+
+type IceServerConfig struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+}
+
+type IceServersConfig struct {
+	IceServers []IceServerConfig `json:"ice_servers"`
+}
+
+func readIceConfig(path string) (*[]webrtc.ICEServer, error) {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	conf := IceServersConfig{}
+	err = json.Unmarshal(data, &conf)
+	if err != nil {
+		return nil, err
+	}
+
+	iceServers := []webrtc.ICEServer{}
+	for _, server := range conf.IceServers {
+		iceServer := webrtc.ICEServer{
+			URLs:       server.URLs,
+			Username:   server.Username,
+			Credential: server.Credential,
+		}
+		iceServers = append(iceServers, iceServer)
+	}
+
+	return &iceServers, nil
 }

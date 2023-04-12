@@ -81,6 +81,7 @@ func (p *Peer) createPeerConnection(iceServers *[]webrtc.ICEServer,
 		} else if pcs == webrtc.PeerConnectionStateClosed {
 			if p.onClose != nil {
 				p.onClose()
+				p.onClose = nil
 			}
 		}
 	})
@@ -118,12 +119,6 @@ func (p *Peer) createPeerConnection(iceServers *[]webrtc.ICEServer,
 			panic("dataChannel.OnOpen: p.onConnect == nil")
 		}
 		p.onConnect()
-	})
-
-	dataChannel.OnClose(func() {
-		if p.onClose != nil {
-			p.onClose()
-		}
 	})
 
 	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {

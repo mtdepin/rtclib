@@ -28,6 +28,7 @@ var (
 	Nthreads         int
 	Mode             string
 	PenetrationCount int
+	PredictStep      int
 )
 
 func init() {
@@ -40,6 +41,7 @@ func init() {
 	flag.IntVar(&Nthreads, "n", 0, "set number of threads.")
 	flag.StringVar(&Mode, "m", "", "set more task mode.")
 	flag.IntVar(&PenetrationCount, "p", 100, "set penetration count.")
+	flag.IntVar(&PredictStep, "t", 0, "set predict step.")
 	flag.Usage = usage
 }
 
@@ -124,6 +126,9 @@ func connectPeer(peerId string, wg *sync.WaitGroup) error {
 	if err != nil {
 		return err
 	}
+	if PredictStep > 0 {
+		host.Predict = PredictStep
+	}
 
 	host.OnPeer(func(p *offer.Peer) {
 		fmt.Printf("host %s connect peer %s suceess.\n", hostId, peerId)
@@ -177,19 +182,32 @@ func penetration(peerId string, count int) error {
 
 	f := func() (time.Duration, error) {
 		var elapsed time.Duration
+		var mutex sync.Mutex
 		host, err := offer.NewRTCHost(hostId, SignalUrl, ICEServers)
 		if err != nil {
 			return elapsed, err
+		}
+		if PredictStep > 0 {
+			host.Predict = PredictStep
 		}
 		start := time.Now()
 
 		doneCh := make(chan struct{})
 
+		closeHost := func() {
+			mutex.Lock()
+			defer mutex.Unlock()
+			if host != nil {
+				host.Close()
+				host = nil
+			}
+		}
+
 		host.OnPeer(func(p *offer.Peer) {
 			elapsed = time.Since(start)
 			success += 1
 			time.AfterFunc(time.Second, func() {
-				host.Close()
+				closeHost()
 			})
 		})
 
@@ -199,14 +217,14 @@ func penetration(peerId string, count int) error {
 		}
 
 		host.OnClose(func() {
-			fmt.Printf("host %s closed, state %s\n", hostId, host.State)
+			fmt.Printf("host %s closed\n", hostId)
 			close(doneCh)
 		})
 
 		select {
 		case <-doneCh:
 		case <-time.After(30 * time.Second):
-			host.Close()
+			closeHost()
 			<-doneCh
 		}
 
@@ -235,6 +253,9 @@ func startAnswer() error {
 	host, err := peer.NewRTCHost(hostId, SignalUrl, ICEServers)
 	if err != nil {
 		return nil
+	}
+	if PredictStep > 0 {
+		host.Predict = PredictStep
 	}
 
 	host.OnPeer(func(p *peer.Peer) {

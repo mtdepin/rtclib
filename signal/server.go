@@ -20,6 +20,7 @@ type AnswerPeer struct {
 	sessions sync.Map
 	conn     net.Conn
 	wsOp     ws.OpCode
+	predict  int
 }
 
 func (p *AnswerPeer) destroy() {
@@ -52,6 +53,7 @@ type Session struct {
 	offerConn net.Conn
 	offerWsOp ws.OpCode
 	state     string
+	predict   int
 }
 
 func (s *Session) destroy() {
@@ -154,6 +156,13 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 		peer := AnswerPeer{
 			peerId: peerId,
 		}
+		if predict, ok := message["predict"]; ok {
+			predict, err := strconv.Atoi(predict)
+			if err != nil {
+				return err
+			}
+			peer.predict = predict
+		}
 		peer.conn = conn
 		peer.wsOp = wsOp
 		s.storePeer(peerId, &peer)
@@ -205,6 +214,13 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 			offerConn: conn,
 			offerWsOp: wsOp,
 			state:     "init",
+		}
+		if predict, ok := message["predict"]; ok {
+			predict, err := strconv.Atoi(predict)
+			if err != nil {
+				return err
+			}
+			sess.predict = predict
 		}
 		peer.storeSession(peerId, &sess)
 
@@ -300,20 +316,25 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 		if !ok {
 			return errors.New("invalid data")
 		}
-		// candidate => candidate:3951633107 1 udp 1694498815 120.242.254.172 44575 typ srflx raddr 0.0.0.0 rport 40819
 
 		candidates := []string{candidate}
-		if strings.Contains(candidate, "srflx") {
-			a := strings.Split(candidate, " ")
-			portStr := a[5]
-			port, err := strconv.Atoi(portStr)
-			if err == nil {
-				for i := 0; i < 10; i++ {
-					c := candidate + ""
-					port += 1
-					c = strings.Replace(c, portStr, strconv.Itoa(port), 1)
-					fmt.Println("dup candidate:", c)
-					candidates = append(candidates, c)
+
+		addPredictCandidate := func(candidate string, predict int) {
+			if predict <= 0 {
+				return
+			}
+			if strings.Contains(candidate, "srflx") {
+				a := strings.Split(candidate, " ")
+				portStr := a[5]
+				port, err := strconv.Atoi(portStr)
+				if err == nil {
+					for i := 0; i < 10; i++ {
+						c := candidate + ""
+						port += predict
+						c = strings.Replace(c, portStr, strconv.Itoa(port), 1)
+						fmt.Println("predict candidate:", c)
+						candidates = append(candidates, c)
+					}
 				}
 			}
 		}
@@ -326,6 +347,10 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 			sess, ok := answer.getSession(offerId)
 			if !ok {
 				return errors.New("peer not exist")
+			}
+
+			if answer.predict > 0 {
+				addPredictCandidate(candidate, answer.predict)
 			}
 
 			for _, c := range candidates {
@@ -353,6 +378,10 @@ func (s *SignalServer) handleMessage(data []byte, conn net.Conn, wsOp ws.OpCode)
 			}
 			if sess.state != "connecting" {
 				return errors.New("invalid data")
+			}
+
+			if sess.predict > 0 {
+				addPredictCandidate(candidate, sess.predict)
 			}
 
 			for _, c := range candidates {

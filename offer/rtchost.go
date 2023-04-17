@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 
 	"github.com/gobwas/ws"
@@ -32,6 +33,7 @@ type RTCHost struct {
 	onPeer     func(*Peer)
 	onClose    func()
 	State      string
+	Predict    int
 }
 
 func NewRTCHost(hostId string, signalUrl string, iceServers *[]webrtc.ICEServer) (*RTCHost, error) {
@@ -90,6 +92,9 @@ func (h *RTCHost) connectPeer(peerId string) error {
 	message["peerId"] = h.hostId
 	message["op"] = "connect"
 	message["answerId"] = peerId
+	if h.Predict != 0 {
+		message["predict"] = fmt.Sprintf("%d", h.Predict)
+	}
 
 	return h.sendToSignal(message)
 }
@@ -248,6 +253,9 @@ func (h *RTCHost) Close() error {
 	if h.peer != nil {
 		logger.Info("peer.Close")
 		err = h.peer.Close()
+		if err == nil {
+			h.peer = nil
+		}
 	}
 	return err
 }

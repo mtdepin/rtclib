@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -39,6 +40,7 @@ type RTCHost struct {
 	signalState   string
 	signalMux     sync.Mutex
 	signalTimer   *time.Timer
+	Predict       int
 }
 
 func NewRTCHost(hostId string, signalUrl string, iceServers *[]webrtc.ICEServer) (*RTCHost, error) {
@@ -131,6 +133,9 @@ func (h *RTCHost) registerToSignal() error {
 	message := make(map[string]string)
 	message["peerId"] = h.hostId
 	message["op"] = "register"
+	if h.Predict > 0 {
+		message["predict"] = fmt.Sprintf("%d", h.Predict)
+	}
 
 	return h.sendToSignal(message)
 }
